@@ -1,0 +1,47 @@
+name: Build and release APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android platform and build tools
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;36.0.0"
+
+      - name: Build signed APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/anim-lock.keystore"
+          export KEYSTORE_PATH="$RUNNER_TEMP/anim-lock.keystore"
+          # Starts at 101 so a release always installs over the early hand-built copies (version codes 1 to 3).
+          export VERSION_CODE=$((100 + RUN_NUMBER))
+          export VERSION_NAME="1.$VERSION_CODE"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          bash build.sh
+          cp build/anim-lock.apk "build/anim-lock-$VERSION_NAME.apk"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION_NAME" "build/anim-lock-$VERSION_NAME.apk" \
+            --title "Animation Lock $VERSION_NAME" \
+            --notes "Built from ${GITHUB_SHA::7}. Download the APK below. First-time setup is in the README."
